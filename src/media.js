@@ -21,6 +21,7 @@ const { Errors, toSnatcherError, isVerdictError } = require('./errors');
 const { validateMediaUrl, detectPlatform } = require('./validate');
 const ytdlp = require('./yt-dlp');
 const { cachedResolve } = require('./cache');
+const faizan = require('./faizan');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']);
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'm3u8', 'mkv']);
@@ -92,7 +93,7 @@ function normalizeItem(raw, fallbackTitle) {
   const url = raw.url || raw.mediaUrl || raw.downloadUrl;
   if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
   let type = String(raw.type || '').toLowerCase();
-  if (type !== 'video' && type !== 'image') type = guessTypeFromUrl(url);
+  if (type !== 'video' && type !== 'image' && type !== 'audio') type = guessTypeFromUrl(url);
   const thumbnail =
     raw.thumbnail && raw.thumbnail !== url ? raw.thumbnail : null;
   return {
@@ -103,8 +104,12 @@ function normalizeItem(raw, fallbackTitle) {
     width: raw.width || null,
     height: raw.height || null,
     quality: raw.quality || null,
-    ext: extFromUrl(url) || (type === 'video' ? 'mp4' : 'jpg'),
+    ext: extFromUrl(url) || (type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg'),
     size: raw.size || raw.filesize || null,
+    // direct:true means the browser opens this URL itself — Snatcher's /dl
+    // proxy must NOT fetch it server-side. Used for the TikTok tt-api /dl
+    // links (the API forbids server-to-server proxying, 403).
+    direct: raw.direct === true,
   };
 }
 
@@ -529,6 +534,63 @@ async function resolvePinterest(url) {
 // handshake (ECONNRESET) anyway.
 // ---------------------------------------------------------------------------
 async function resolveTikTok(url) {
+  // FAK LABS tt-api primary (no watermark, video + audio). The tt-api /dl
+  // links are browser-direct (the API forbids server-to-server proxying),
+  // so items carry direct:true. CAPTION RULE: the caption is the tt-api
+  // description when present; when it is empty, the old code supplies it
+  // (fetchCaption = yt-dlp) — the video link still stays tt-api.
+  try {
+    const tt = await faizan.fetchTikTok(url);
+    const videoOk = await faizan.verifyUrl(tt.videoUrl, 'TikTok video');
+    if (!videoOk) {
+      logger.warn('tt-api video link did not verify, falling back to yt-dlp/ttdl');
+      throw new Error('tt-api video link not reachable');
+    }
+    let caption = pickCaption(tt.description);
+    if (!caption) {
+      caption = await fetchCaption(url);
+    }
+    const items = [
+      normalizeItem(
+        {
+          url: tt.videoUrl,
+          thumbnail: tt.thumbnail || null,
+          type: 'video',
+          title: 'TikTok video',
+          width: tt.width,
+          height: tt.height,
+          direct: true,
+        },
+        'TikTok video'
+      ),
+    ].filter(Boolean);
+    // Audio track (same API, browser-direct). A bad audio link just drops
+    // the audio item — it never fails the video.
+    if (tt.audioUrl) {
+      const audioOk = await faizan.verifyUrl(tt.audioUrl, 'TikTok audio');
+      if (audioOk) {
+        const audioItem = normalizeItem(
+          {
+            url: tt.audioUrl,
+            type: 'audio',
+            title: 'TikTok audio',
+            ext: 'mp3',
+            direct: true,
+          },
+          'TikTok audio'
+        );
+        if (audioItem) items.push(audioItem);
+      }
+    }
+    if (items.length > 0) {
+      return { title: 'TikTok video', thumbnail: tt.thumbnail || null, items, caption };
+    }
+    throw Errors.noMedia();
+  } catch (err) {
+    if (isVerdictError(err)) throw err;
+    logger.warn({ err: err.message }, 'tt-api TikTok failed, trying yt-dlp then ttdl');
+  }
+
   try {
     const info = await ytdlp.getInfo(url);
     // TikTok's title IS the caption (yt-dlp returns the caption as the
@@ -704,6 +766,55 @@ async function resolveFacebook(url) {
 // fallback. Thumbnails fall back to nothing, never to the video URL itself.
 // ---------------------------------------------------------------------------
 async function resolveTwitter(url) {
+  // FAK LABS x-api primary (video + photos, direct CDN links). The X API
+  // has no server-proxying restriction, so items go through Snatcher's /dl
+  // proxy as usual. CAPTION RULE: the caption is the x-api post.caption
+  // when present; when it is empty, the old code supplies it (fetchCaption
+  // = yt-dlp) — the media link still stays x-api. Photo posts return their
+  // images in `download` (all_thumbnails); text-only posts have no media.
+  try {
+    const x = await faizan.fetchX(url);
+    if (x.mediaType === 'text') {
+      throw new Error('X post has no media (text only)');
+    }
+    let items = [];
+    let primaryUrl = null;
+    if (x.mediaType === 'photo') {
+      if (x.photoUrls.length === 0) throw new Error('X API: no photo URLs');
+      primaryUrl = x.photoUrls[0];
+      items = x.photoUrls
+        .map((photoUrl) =>
+          normalizeItem({ url: photoUrl, type: 'image', title: 'X photo' }, 'X photo')
+        )
+        .filter(Boolean);
+    } else {
+      // video or animated_gif
+      if (!x.videoUrl) throw new Error('X API: no video URL');
+      primaryUrl = x.videoUrl;
+      items = [
+        normalizeItem({ url: x.videoUrl, type: 'video', title: 'Twitter video' }, 'Twitter video'),
+      ].filter(Boolean);
+    }
+    if (items.length === 0) throw Errors.noMedia();
+    const mediaOk = await faizan.verifyUrl(primaryUrl, 'X media');
+    if (!mediaOk) {
+      logger.warn('x-api media link did not verify, falling back to btch/yt-dlp/scrape');
+      throw new Error('x-api media link not reachable');
+    }
+    let caption = pickCaption(x.caption);
+    if (!caption) {
+      caption = await fetchCaption(url);
+    }
+    return {
+      title: x.mediaType === 'photo' ? 'X post' : 'Twitter video',
+      thumbnail: x.thumbnail || (items[0] && items[0].url) || null,
+      items,
+      caption,
+    };
+  } catch (err) {
+    logger.warn({ err: err.message }, 'x-api Twitter failed, trying btch then yt-dlp then scrape');
+  }
+
   try {
     const data = await withTimeout(twitter(url), config.upstreamTimeoutMs, 'Twitter');
     let bestUrl = null;

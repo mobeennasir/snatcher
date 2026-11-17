@@ -306,7 +306,8 @@
         }
       } else if (
         err instanceof TypeError &&
-        /^https?:\/\/[^/]*\.tiktokio\.com\//i.test(url)
+        (/^https?:\/\/[^/]*\.tiktokio\.com\//i.test(url) ||
+          /^https?:\/\/tt-api\.faizankhichi\.me\//i.test(url))
       ) {
         // The browser fetch to the TikTok link was blocked (CORS / the
         // phone's network) — "Failed to fetch". A plain navigation to the
@@ -314,7 +315,7 @@
         // proves the link loads on this device. Hand the download to the
         // browser instead of showing an error. The file saves under the
         // server's tikio.com name rather than the caption name — a working
-        // download beats a pretty name.
+        // download beats a pretty name. (Same for the tt-api /dl link.)
         hideDownloadLoader();
         setStatus('Downloading directly…');
         navigateDownload(url);
@@ -439,11 +440,11 @@
       });
       preview.appendChild(img);
     }
-    preview.appendChild(el('span', { class: 'type-badge', text: item.type === 'video' ? 'Video' : 'Photo' }));
+    preview.appendChild(el('span', { class: 'type-badge', text: item.type === 'video' ? 'Video' : item.type === 'audio' ? 'Audio' : 'Photo' }));
     card.appendChild(preview);
 
     const body = el('div', { class: 'body' });
-    body.appendChild(el('p', { class: 'title', text: item.title || `${item.type === 'video' ? 'Video' : 'Photo'} ${index + 1}` }));
+    body.appendChild(el('p', { class: 'title', text: item.title || `${item.type === 'video' ? 'Video' : item.type === 'audio' ? 'Audio' : 'Photo'} ${index + 1}` }));
     body.appendChild(el('p', { class: 'meta', text: metaLine(item) }));
     if (sourceUrl) {
       let short = String(sourceUrl);

@@ -188,6 +188,12 @@ function withDownloadLinks(platform, title, items, sourceUrl, caption) {
       // it and save it under the nice caption-based name. So TikTok
       // downloads go browser-direct, not through the /dl proxy.
       downloadUrl = item.url;
+    } else if (item.direct === true) {
+      // Browser-direct link (TikTok tt-api /dl): the FAK LABS API forbids
+      // server-to-server proxying (403), so the browser fetches it itself.
+      // It sends `access-control-allow-origin: *`, so the loader's fetch
+      // reads it and saves under the caption-based name, same as tiktokio.
+      downloadUrl = item.url;
     } else {
       downloadUrl = buildDirectDownloadUrl({ url: item.url, filename, size: item.size || null });
     }
