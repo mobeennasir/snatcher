@@ -34,10 +34,13 @@ describe('pages', () => {
     });
   }
 
-  it('GET /unknown-platform redirects to the error page', async () => {
+  it('GET /unknown-platform is a direct 404, not a redirect', async () => {
+    // H2 (SEO audit): a bad URL used to 302 to /error, which reads as a
+    // soft 404 to crawlers. It now serves the 404 page directly.
     const res = await request(app).get('/not-a-platform');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/error?code=not_found');
+    expect(res.status).toBe(404);
+    expect(res.headers.location).toBeUndefined();
+    expect(res.text).toContain('Lost in space.');
   });
 
   it('GET /error?code=not_found is a 404 with the space page', async () => {
@@ -117,6 +120,82 @@ describe('pages', () => {
   });
 });
 
+describe('seo', () => {
+  it('GET /robots.txt is a 200 with crawl rules and a sitemap line', async () => {
+    const res = await request(app).get('/robots.txt');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('User-agent: *');
+    expect(res.text).toContain('Disallow: /dl');
+    expect(res.text).toContain('Disallow: /api/');
+    expect(res.text).toContain('Sitemap:');
+    expect(res.text).toContain('/sitemap.xml');
+  });
+
+  it('GET /sitemap.xml lists home, the 5 platforms and the 4 legal pages', async () => {
+    const res = await request(app).get('/sitemap.xml');
+    expect(res.status).toBe(200);
+    for (const p of ['/', '/instagram', '/tiktok', '/facebook', '/twitter', '/pinterest', '/privacy', '/terms', '/about', '/contact']) {
+      expect(res.text).toContain(`<loc>${process.env.SITE_URL || 'https://snatcher.apps.mistral.run'}${p}</loc>`);
+    }
+  });
+
+  it('GET /privacy, /terms, /about, /contact all render', async () => {
+    for (const p of ['/privacy', '/terms', '/about', '/contact']) {
+      const res = await request(app).get(p);
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('privacy page carries the Google ad-cookie disclosure', async () => {
+    const res = await request(app).get('/privacy');
+    expect(res.text).toContain('advertising cookies');
+    expect(res.text).toContain('Google Ads Settings');
+  });
+
+  it('terms page carries a DMCA takedown process', async () => {
+    const res = await request(app).get('/terms');
+    expect(res.text).toContain('DMCA');
+    expect(res.text).toContain('takedown notice');
+  });
+
+  it('home carries absolute og:image, canonical and WebApplication JSON-LD', async () => {
+    const res = await request(app).get('/');
+    expect(res.text).toContain('content="https://snatcher.apps.mistral.run/og.jpg"');
+    expect(res.text).toContain('<link rel="canonical" href="https://snatcher.apps.mistral.run/"');
+    expect(res.text).toContain('"WebApplication"');
+    expect(res.text).toContain('"FAQPage"');
+  });
+
+  it('platform pages carry a FAQPage JSON-LD and a lawful-use line', async () => {
+    const res = await request(app).get('/instagram');
+    expect(res.text).toContain('"FAQPage"');
+    expect(res.text).toContain('Only download content you own or have permission to keep.');
+  });
+
+  it('error pages are noindex and their title is not doubled', async () => {
+    const res = await request(app).get('/error?code=not_found');
+    expect(res.text).toContain('content="noindex"');
+    const title = res.text.match(/<title>(.*?)<\/title>/)[1];
+    expect(title).toBe('Lost in space. · Snatcher');
+    expect(title.match(/Snatcher/g)).toHaveLength(1);
+  });
+
+  it('no Google Fonts stylesheet is loaded', async () => {
+    const res = await request(app).get('/');
+    expect(res.text).not.toContain('fonts.googleapis.com');
+    expect(res.text).not.toContain('fonts.gstatic.com');
+  });
+
+  it('footer says Five platforms and links the legal pages', async () => {
+    const res = await request(app).get('/');
+    expect(res.text).toContain('Five platforms, one bar.');
+    expect(res.text).not.toContain('Six platforms');
+    for (const p of ['/privacy', '/terms', '/about', '/contact']) {
+      expect(res.text).toContain(`href="${p}"`);
+    }
+  });
+});
+
 describe('static assets', () => {
   it('stylesheet is served with max-age 0 so theme changes reach browsers', async () => {
     const res = await request(app).get('/css/styles.css');
@@ -159,10 +238,12 @@ describe('platform download', () => {
     expect(res.body.code).toBe('unsupported_platform');
   });
 
-  it('GET /youtube redirects to the error page', async () => {
+  it('GET /youtube is a direct 404, not a redirect', async () => {
+    // H2 (SEO audit): same as /unknown-platform — a direct 404 page.
     const res = await request(app).get('/youtube');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/error?code=not_found');
+    expect(res.status).toBe(404);
+    expect(res.headers.location).toBeUndefined();
+    expect(res.text).toContain('Lost in space.');
   });
 });
 

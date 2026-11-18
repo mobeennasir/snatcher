@@ -36,7 +36,7 @@
   --deep: 7% 0.01 40;
   --font-display: "General Sans", ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-display);
-  --font-outlier: "Geist Mono", ui-monospace, monospace;
+  --font-outlier: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --radius-card: 8px;
   --radius-input: 6px;
   --radius-pill: 999px;
@@ -688,6 +688,122 @@ video {
   font-size: 0.9375rem;
 }
 
+/* Lawful-use line under the download form. Small, but visible before
+  the results — the footer fine print alone was not enough. */
+.lawful-note {
+  margin-top: var(--space-md);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+/* SEO content blocks: the "What you can download" copy and the FAQ on
+  the home and platform pages. Plain prose, same type scale as the rest. */
+.seo-block h2 {
+  font-size: 1.25rem;
+  margin-bottom: var(--space-md);
+}
+
+.seo-block h2:not(:first-child) {
+  margin-top: var(--space-xl);
+}
+
+.seo-block p {
+  max-width: 42rem;
+  color: var(--color-ink-2);
+}
+
+.seo-block p + p {
+  margin-top: var(--space-md);
+}
+
+.faq {
+  display: grid;
+  gap: var(--space-md);
+  max-width: 42rem;
+}
+
+.faq-item h3 {
+  font-size: 1rem;
+  margin-bottom: var(--space-xs);
+}
+
+.faq-item p {
+  color: var(--color-muted);
+}
+
+.cross-links {
+  margin-top: var(--space-xl);
+  font-size: 0.9375rem;
+  color: var(--color-muted);
+}
+
+.cross-links a {
+  color: var(--color-ink);
+  margin-right: var(--space-md);
+  white-space: nowrap;
+}
+
+/* Legal / info pages. Narrow measure for long-form reading. */
+.legal .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  text-decoration: none;
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  margin-bottom: var(--space-lg);
+}
+
+.legal .back-link:hover {
+  color: var(--color-ink);
+}
+
+.legal .back-link svg {
+  width: 16px;
+  height: 16px;
+}
+
+.legal h1 {
+  margin-bottom: var(--space-md);
+}
+
+.legal .lede {
+  margin-bottom: var(--space-lg);
+  color: var(--color-muted);
+  max-width: 38rem;
+}
+
+.legal h2 {
+  font-size: 1.25rem;
+  margin-top: var(--space-xl);
+  margin-bottom: var(--space-md);
+}
+
+.legal p,
+.legal li {
+  max-width: 42rem;
+  color: var(--color-ink-2);
+}
+
+.legal p + p {
+  margin-top: var(--space-md);
+}
+
+.legal ul {
+  margin: var(--space-md) 0 0;
+  padding-left: 1.25rem;
+  color: var(--color-ink-2);
+}
+
+.legal li + li {
+  margin-top: var(--space-xs);
+}
+
+.legal a {
+  color: var(--color-ink);
+}
+
 /* Results */
 .results {
   padding-block: var(--space-lg) var(--space-2xl);
@@ -935,6 +1051,23 @@ video {
 
 .site-footer .fine {
   margin-left: auto;
+}
+
+.footer-links {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.footer-links a {
+  color: var(--color-muted);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+
+.footer-links a:hover {
+  color: var(--color-ink);
 }
 
 /* Error page */

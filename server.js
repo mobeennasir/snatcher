@@ -27,6 +27,8 @@ const {
   needsBuffer,
 } = require('./src/download-links');
 const { resolveMedia, resolveForBatch, safeFilename, urlFingerprint, captionNameBase } = require('./src/media');
+const { PLATFORM_CONTENT, HOME_CONTENT, faqJsonLd } = require('./src/seo-content');
+const { LEGAL_PAGES } = require('./src/legal-content');
 const ytdlp = require('./src/yt-dlp');
 const { FORMAT_ID_RE } = ytdlp;
 const { cachedResolve, cacheStats, queue } = require('./src/cache');
@@ -38,9 +40,21 @@ const app = express();
 // after the flexbox push because the browser held the old styles.css.)
 // Bump the version in package.json on every push.
 app.locals.assetVersion = require('./package.json').version;
-app.set('trust proxy', 1); // Koyeb terminates TLS in front of us.
+// Canonical base URL (og:image, canonical links, sitemap). Set SITE_URL in
+// env when the site moves to a custom domain — no host is hard-coded.
+app.locals.siteUrl = config.siteUrl;
+app.set('trust proxy', 1); // The platform terminates TLS in front of us.
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+// Canonical URL for every GET page: the absolute URL of the page itself.
+// The error page is excluded (it carries noindex and no canonical).
+app.use((req, res, next) => {
+  if (req.method === 'GET' && req.path !== '/error') {
+    res.locals.canonical = config.siteUrl + (req.path === '/' ? '/' : req.path);
+  }
+  next();
+});
 
 // --- middleware ------------------------------------------------------------
 app.use(
@@ -49,8 +63,11 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'", 'https://fonts.googleapis.com', 'https://api.fontshare.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdn.fontshare.com'],
+        // Fonts are self-hosted for the UI font (Fontshare General Sans is
+        // the only external font provider left; the Geist Mono webfont was
+        // dropped in v3.5.0 for a system mono stack, so Google Fonts is gone).
+        styleSrc: ["'self'", 'https://api.fontshare.com'],
+        fontSrc: ["'self'", 'https://cdn.fontshare.com'],
         imgSrc: ["'self'", 'data:', 'https:'],
         mediaSrc: ["'self'", 'https:'],
         connectSrc: ["'self'"],
@@ -103,40 +120,45 @@ const PLATFORMS = {
   instagram: {
     key: 'instagram',
     name: 'Instagram',
-    title: 'Instagram Downloader',
-    subtitle: 'Reels, posts and carousels — every photo and video inside, yours to pick.',
+    title: 'Instagram Reels, Video & Photo Downloader',
+    subtitle:
+      'Download Instagram reels, posts and carousels — every photo and video in full quality. Free, no account, no app to install.',
     placeholder: 'Paste your Instagram link here...',
     hint: 'Works with reels, single posts and carousel posts.',
   },
   pinterest: {
     key: 'pinterest',
     name: 'Pinterest',
-    title: 'Pinterest Downloader',
-    subtitle: 'Pins, photos and videos in high quality.',
+    title: 'Pinterest Pins, Video & Photo Downloader',
+    subtitle:
+      'Download Pinterest pins, photos and videos in high quality. Use the Photos / Videos switch to filter. Free, no account needed.',
     placeholder: 'Paste your Pinterest link here...',
     hint: 'Use the Photos / Videos switch to filter the results.',
   },
   tiktok: {
     key: 'tiktok',
     name: 'TikTok',
-    title: 'TikTok Downloader',
-    subtitle: 'Videos without the watermark.',
+    title: 'TikTok Video Downloader Without Watermark',
+    subtitle:
+      'Download TikTok videos without the watermark — paste any TikTok link and save the MP4 in one click. Free, no account, no app.',
     placeholder: 'Paste your TikTok link here...',
     hint: 'Paste any TikTok video link.',
   },
   facebook: {
     key: 'facebook',
     name: 'Facebook',
-    title: 'Facebook Downloader',
-    subtitle: 'Videos from posts, reels and watch.',
+    title: 'Facebook Video Downloader for Reels & Watch',
+    subtitle:
+      'Download Facebook videos from posts, reels and Watch in the best quality available. Free, no account, no app to install.',
     placeholder: 'Paste your Facebook link here...',
     hint: 'Paste a Facebook video, reel or post link.',
   },
   twitter: {
     key: 'twitter',
     name: 'Twitter/X',
-    title: 'Twitter/X Downloader',
-    subtitle: 'Videos from posts, in the best quality available.',
+    title: 'Twitter/X Video Downloader & Photo Saver',
+    subtitle:
+      'Download videos and photos from X (Twitter) posts in the best quality available. Free, no account, no app to install.',
     placeholder: 'Paste your Twitter/X link here...',
     hint: 'Paste a tweet link with a video.',
   },
@@ -232,8 +254,51 @@ app.get('/health/ready', async (req, res) => {
 
 // --- pages -----------------------------------------------------------------
 app.get('/', (req, res) => {
-  res.render('home', { platforms: PLATFORMS });
+  const webApp = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'Snatcher',
+    url: `${config.siteUrl}/`,
+    applicationCategory: 'MultimediaApplication',
+    operatingSystem: 'Any',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    featureList:
+      'Instagram downloader, TikTok downloader, Facebook downloader, Twitter/X downloader, Pinterest downloader',
+  };
+  res.render('home', {
+    platforms: PLATFORMS,
+    homeContent: HOME_CONTENT,
+    jsonLd: [webApp, faqJsonLd(HOME_CONTENT.faq)],
+  });
 });
+
+// robots.txt + sitemap.xml. These are real routes (not files) so the
+// Sitemap line and the lastmod always match the configured site URL.
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(
+    ['User-agent: *', 'Allow: /', 'Disallow: /dl', 'Disallow: /api/', 'Disallow: /error', '', `Sitemap: ${config.siteUrl}/sitemap.xml`, ''].join('\n')
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const urls = ['/', ...PLATFORM_KEYS.map((k) => `/${k}`), '/privacy', '/terms', '/about', '/contact'];
+  const body = urls
+    .map((u) => `  <url><loc>${config.siteUrl}${u}</loc><lastmod>${today}</lastmod></url>`)
+    .join('\n');
+  res.type('application/xml').send(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`
+  );
+});
+
+// Legal / info pages. Defined before /:platform so the catch-all never
+// swallows them. Explicit routes (no regex param) — path-to-regexp v8
+// rejects the `:param(a|b)` form.
+for (const key of Object.keys(LEGAL_PAGES)) {
+  app.get(`/${key}`, (req, res) => {
+    res.render('legal', { page: LEGAL_PAGES[key], platforms: PLATFORMS });
+  });
+}
 
 app.get('/error', (req, res) => {
   const code = typeof req.query.code === 'string' ? req.query.code : 'unknown';
@@ -260,7 +325,8 @@ app.get('/error', (req, res) => {
     `Time: ${new Date().toISOString()}`,
   ];
   const reportUrl = `https://wa.me/${config.reportWhatsappNumber}?text=${encodeURIComponent(lines.join('\n'))}`;
-  res.status(page.status).render('error', { code, page, platforms: PLATFORMS, reportUrl });
+  // Error pages are never indexed.
+  res.status(page.status).render('error', { code, page, platforms: PLATFORMS, reportUrl, noindex: true });
 });
 
 app.get('/:platform', (req, res, next) => {
@@ -274,8 +340,25 @@ app.get('/:platform', (req, res, next) => {
     return res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
   }
   const cfg = PLATFORMS[platform];
-  if (!cfg) return res.redirect('/error?code=not_found');
-  res.render('platform', { platform: cfg, platforms: PLATFORMS });
+  if (!cfg) {
+    // Unknown URL: serve the 404 page directly with a 404 status. A
+    // redirect to /error used to turn every bad URL into a 302 chain,
+    // which wastes crawl budget and looks like a soft 404 to Google.
+    const page = errorPageFor('not_found');
+    return res.status(404).render('error', {
+      code: 'not_found',
+      page,
+      platforms: PLATFORMS,
+      reportUrl: null,
+      noindex: true,
+    });
+  }
+  res.render('platform', {
+    platform: cfg,
+    platforms: PLATFORMS,
+    content: PLATFORM_CONTENT[platform],
+    jsonLd: [faqJsonLd(PLATFORM_CONTENT[platform].faq)],
+  });
 });
 
 // --- per-platform resolve ----------------------------------------------------
@@ -493,7 +576,16 @@ app.use((req, res) => {
   if (req.path.startsWith('/api/') || req.path === '/dl') {
     return res.status(404).json({ success: false, error: 'Not found.', code: 'not_found' });
   }
-  res.redirect('/error?code=not_found');
+  // Any other unknown path: a direct 404 page, never a redirect. A 302
+  // here used to make bad URLs look like soft 404s to crawlers.
+  const page = errorPageFor('not_found');
+  res.status(404).render('error', {
+    code: 'not_found',
+    page,
+    platforms: PLATFORMS,
+    reportUrl: null,
+    noindex: true,
+  });
 });
 
 app.use((err, req, res, next) => {
@@ -502,7 +594,14 @@ app.use((err, req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/dl') {
     return res.status(e.status).json({ success: false, error: e.message, code: e.code });
   }
-  res.redirect(`/error?code=${e.code}`);
+  const page = errorPageFor(e.code);
+  res.status(e.status).render('error', {
+    code: e.code,
+    page,
+    platforms: PLATFORMS,
+    reportUrl: null,
+    noindex: true,
+  });
 });
 
 if (require.main === module) {

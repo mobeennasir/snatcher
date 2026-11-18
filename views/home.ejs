@@ -1,4 +1,4 @@
-<%- include('partials/head', { title: 'Snatcher — grab any video, keep the file', description: 'Paste a link from Instagram, Facebook, TikTok, Twitter/X or Pinterest and download the video or images in one click.' }) %>
+<%- include('partials/head', { title: 'Download Videos & Photos — Free, No Account', description: 'Paste a link from Instagram, Facebook, TikTok, Twitter/X or Pinterest and download the video or images in one click. Free, no account.' }) %>
 <body data-page="home">
 <%- include('partials/icons') %>
 <%- include('partials/header', { platforms }) %>
@@ -58,6 +58,22 @@
             <h3><%= p.name %></h3>
             <p><%= p.subtitle %></p>
           </a>
+        <% } %>
+      </div>
+    </div>
+  </section>
+
+  <section class="section seo-block">
+    <div class="container">
+      <h2>How Snatcher works</h2>
+      <% for (const para of homeContent.about) { %><p><%= para %></p>
+      <% } %>
+      <h2>Frequently asked questions</h2>
+      <div class="faq">
+        <% for (const item of homeContent.faq) { %><div class="faq-item">
+          <h3><%= item.q %></h3>
+          <p><%= item.a %></p>
+        </div>
         <% } %>
       </div>
     </div>

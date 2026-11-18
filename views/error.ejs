@@ -1,4 +1,4 @@
-<%- include('partials/head', { title: page.title + ' · Snatcher', description: page.line }) %>
+<%- include('partials/head', { title: page.title, description: page.line }) %>
 <body data-page="error">
 <%- include('partials/icons') %>
 <%- include('partials/header', { platforms }) %>
@@ -60,7 +60,7 @@
       <div class="error-actions">
         <button type="button" class="btn btn--primary" onclick="history.back()">Try again</button>
         <a class="btn btn--secondary" href="/">Back home</a>
-        <a class="btn btn--whatsapp" href="<%= reportUrl %>" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-chat" /></svg>Report on WhatsApp</a>
+        <% if (typeof reportUrl !== 'undefined' && reportUrl) { %><a class="btn btn--whatsapp" href="<%= reportUrl %>" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-chat" /></svg>Report on WhatsApp</a><% } %>
       </div>
     </div>
   </div>

@@ -3,6 +3,11 @@
 const crypto = require('crypto');
 
 const config = {
+  // Canonical base URL for og:image, canonical links and the sitemap.
+  // Override with SITE_URL when the site moves to a custom domain — the
+  // code never hard-codes a host, so a domain swap is one env var.
+  siteUrl: (process.env.SITE_URL || 'https://snatcher.apps.mistral.run').replace(/\/$/, ''),
+
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
