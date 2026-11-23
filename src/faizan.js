@@ -171,11 +171,31 @@ function extractTikTokUsername(input) {
 
 // GET a JSON path on the profile API. Throws a SnatcherError: 404 becomes
 // link_not_found (no such profile), other bad statuses become upstream_error.
+// A failed fetch (DNS / refused / reset / timeout) is logged with its real
+// cause server-side, then re-thrown — the client only ever sees our
+// generic upstream_error, but the host log now names the cause.
 async function fetchProfileJson(path) {
-  const res = await fetch(`${PROFILE_API}${path}`, {
-    headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
-    signal: AbortSignal.timeout(config.upstreamTimeoutMs),
-  });
+  let res;
+  try {
+    res = await fetch(`${PROFILE_API}${path}`, {
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
+      signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+    });
+  } catch (err) {
+    const cause = err && err.cause;
+    logger.error(
+      {
+        errName: err && err.name,
+        errCode: err && err.code,
+        causeCode: cause && cause.code,
+        causeMessage: cause && cause.message,
+        errMessage: err && err.message,
+        url: `${PROFILE_API}${path}`,
+      },
+      'tiktok profile fetch failed'
+    );
+    throw err;
+  }
   if (res.status === 404) {
     throw Errors.linkNotFound('No TikTok profile found for that username.');
   }
