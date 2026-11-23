@@ -528,13 +528,49 @@ async function resolvePinterest(url) {
 }
 
 // ---------------------------------------------------------------------------
-// TikTok — yt-dlp primary (talks to TikTok directly), btch ttdl fallback.
-// No third-party API in the middle: the old silvatechinc fallback is gone —
-// it is an unvetted service on a random domain, and it was dying mid-TLS
-// handshake (ECONNRESET) anyway.
+// TikTok — ttdl primary (btch), tt-api then yt-dlp fallback.
+// ORDER (his call, 2026-11-23): ttdl first. On the live host tt-api 403s
+// and yt-dlp times out most of the time, and each failed attempt costs
+// seconds before the next one even starts — ttdl first keeps the wait
+// short. The old silvatechinc fallback is gone — it is an unvetted
+// service on a random domain, and it was dying mid-TLS handshake
+// (ECONNRESET) anyway.
 // ---------------------------------------------------------------------------
 async function resolveTikTok(url) {
-  // FAK LABS tt-api primary (no watermark, video + audio). The tt-api /dl
+  // btch ttdl FIRST. The ttdl URL is a dl.tiktokio.com proxy link (not a
+  // TikTok CDN link). It answers 200 + video/mp4 to a plain GET from most
+  // IPs, but the server-side fetch 403s from some datacenter IPs — so the
+  // download goes browser-direct (withDownloadLinks hands the raw
+  // tiktokio URL to the loader, which fetches it from the user's own IP;
+  // it sends `access-control-allow-origin: *`). No yt-dlp re-run, which
+  // is what 502'd on the throttled Koyeb IP.
+  try {
+    const data = await withTimeout(ttdl(url), config.upstreamTimeoutMs, 'TikTok');
+    if (data && data.status === true && Array.isArray(data.video) && data.video[0]) {
+      const items = data.video
+        .map((videoUrl) =>
+          normalizeItem(
+            {
+              url: videoUrl,
+              thumbnail: data.thumbnail || null,
+              type: 'video',
+              title: 'TikTok video',
+            },
+            'TikTok video'
+          )
+        )
+        .filter(Boolean);
+      if (items.length > 0) {
+        return { title: 'TikTok video', thumbnail: data.thumbnail || null, items, caption: pickCaption(data.title) };
+      }
+    }
+    throw Errors.noMedia();
+  } catch (err) {
+    if (isVerdictError(err)) throw err;
+    logger.warn({ err: err.message }, 'ttdl TikTok failed, trying tt-api then yt-dlp');
+  }
+
+  // FAK LABS tt-api second (no watermark, video + audio). The tt-api /dl
   // links are browser-direct (the API forbids server-to-server proxying),
   // so items carry direct:true. CAPTION RULE: the caption is the tt-api
   // description when present; when it is empty, the old code supplies it
@@ -543,7 +579,7 @@ async function resolveTikTok(url) {
     const tt = await faizan.fetchTikTok(url);
     const videoOk = await faizan.verifyUrl(tt.videoUrl, 'TikTok video');
     if (!videoOk) {
-      logger.warn('tt-api video link did not verify, falling back to yt-dlp/ttdl');
+      logger.warn('tt-api video link did not verify, falling back to yt-dlp');
       throw new Error('tt-api video link not reachable');
     }
     let caption = pickCaption(tt.description);
@@ -588,9 +624,10 @@ async function resolveTikTok(url) {
     throw Errors.noMedia();
   } catch (err) {
     if (isVerdictError(err)) throw err;
-    logger.warn({ err: err.message }, 'tt-api TikTok failed, trying yt-dlp then ttdl');
+    logger.warn({ err: err.message }, 'tt-api TikTok failed, trying yt-dlp');
   }
 
+  // yt-dlp last.
   try {
     const info = await ytdlp.getInfo(url);
     // TikTok's title IS the caption (yt-dlp returns the caption as the
@@ -615,36 +652,9 @@ async function resolveTikTok(url) {
     if (isVerdictError(err)) {
       throw err;
     }
-    logger.warn({ err: err.message }, 'yt-dlp TikTok failed, trying ttdl');
+    logger.warn({ err: err.message }, 'yt-dlp TikTok failed, no more fallbacks');
+    throw Errors.noMedia();
   }
-
-  const data = await withTimeout(ttdl(url), config.upstreamTimeoutMs, 'TikTok');
-  if (data && data.status === true && Array.isArray(data.video) && data.video[0]) {
-    const items = data.video
-      .map((videoUrl) =>
-        normalizeItem(
-          {
-            url: videoUrl,
-            thumbnail: data.thumbnail || null,
-            type: 'video',
-            title: 'TikTok video',
-          },
-          'TikTok video'
-        )
-      )
-      .filter(Boolean);
-    // The ttdl URL is a dl.tiktokio.com proxy link (not a TikTok CDN
-    // link). It answers 200 + video/mp4 to a plain GET from most IPs,
-    // but the server-side fetch 403s from Koyeb's datacenter IP — so
-    // the download goes browser-direct (withDownloadLinks hands the
-    // raw tiktokio URL to the loader, which fetches it from the user's
-    // own IP; it sends `access-control-allow-origin: *`). No yt-dlp
-    // re-run, which is what 502'd on the throttled Koyeb IP.
-    if (items.length > 0) {
-      return { title: 'TikTok video', thumbnail: data.thumbnail || null, items, caption: pickCaption(data.title) };
-    }
-  }
-  throw Errors.noMedia();
 }
 
 // ---------------------------------------------------------------------------

@@ -200,6 +200,20 @@ async function fetchProfileJson(path) {
     throw Errors.linkNotFound('No TikTok profile found for that username.');
   }
   if (!res.ok) {
+    // Log the real upstream status server-side — this is the "proper
+    // error" the host log needs. The client only ever sees our generic
+    // upstream_error, and sendApiError only logs our code, so without
+    // this line the host log cannot say which status the API returned.
+    let body = '';
+    try {
+      body = (await res.text()).slice(0, 300);
+    } catch {
+      // Body unreadable — the status alone is still the useful part.
+    }
+    logger.error(
+      { upstreamStatus: res.status, upstreamBody: body, url: `${PROFILE_API}${path}` },
+      'tiktok profile api returned an error status'
+    );
     throw Errors.upstreamError(`TikTok profile service returned HTTP ${res.status}.`);
   }
   const data = await res.json();
