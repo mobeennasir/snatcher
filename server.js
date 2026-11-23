@@ -31,6 +31,7 @@ const { PLATFORM_CONTENT, HOME_CONTENT, faqJsonLd } = require('./src/seo-content
 const { LEGAL_PAGES } = require('./src/legal-content');
 const ytdlp = require('./src/yt-dlp');
 const { FORMAT_ID_RE } = ytdlp;
+const { fetchTikTokProfileVideos } = require('./src/faizan');
 const { cachedResolve, cacheStats, queue } = require('./src/cache');
 
 const app = express();
@@ -388,6 +389,42 @@ app.post('/:platform/download', async (req, res) => {
       caption: result.caption || null,
       mediaItems: withDownloadLinks(platform, result.title, items, url, result.caption),
     });
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+// --- TikTok profile: list a creator's videos with download links ------------
+// GET /api/tiktok/profile?u=<username>&limit=30&cursor=<cursor>
+// Proxies Faizan's TikTok Profile Search API (/videos) and returns the
+// profile + one page of videos. Each video's downloadUrl is re-signed
+// through Snatcher's /dl proxy: the raw link is a direct TikTok CDN URL
+// with no CORS headers and no Content-Disposition, so a browser fetch
+// fails and a plain navigation only plays the video. Through /dl the file
+// downloads for real, with a clean filename and the loader's progress.
+// (The server fetches the CDN URL itself — verified working from a
+// datacenter IP, 200 + valid MP4.)
+app.get('/api/tiktok/profile', async (req, res) => {
+  try {
+    const { u, limit, cursor } = req.query || {};
+    if (!u || typeof u !== 'string' || !u.trim()) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'Enter a TikTok username.', code: 'invalid_url' });
+    }
+    const result = await fetchTikTokProfileVideos(u, { limit, cursor });
+    const username = result.user.username || 'tiktok';
+    const videos = result.videos.map((v) => {
+      const filename = safeFilename(`${username}-${v.id || 'video'}`, 'mp4');
+      return {
+        ...v,
+        downloadUrl: v.downloadUrl
+          ? buildDirectDownloadUrl({ url: v.downloadUrl, filename, size: null })
+          : null,
+        filename,
+      };
+    });
+    res.json({ success: true, ...result, videos });
   } catch (err) {
     sendApiError(res, err);
   }

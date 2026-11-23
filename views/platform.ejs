@@ -35,6 +35,23 @@
         </fieldset>
       <% } %>
 
+      <% if (platform.key === 'tiktok') { %>
+        <fieldset class="segmented segmented--spaced" id="tiktokMode">
+          <legend class="visually-hidden">TikTok mode</legend>
+          <label><input type="radio" name="tiktokMode" value="video" checked /> Video link</label>
+          <label><input type="radio" name="tiktokMode" value="profile" /> Profile</label>
+        </fieldset>
+
+        <form id="profileForm" class="url-bar" hidden novalidate>
+          <label for="profileInput" class="visually-hidden">TikTok username or profile link</label>
+          <input type="text" id="profileInput" name="profile" placeholder="@username or profile link..." autocomplete="off" spellcheck="false" />
+          <button type="submit" class="btn btn--primary" id="profileBtn">
+            <svg aria-hidden="true"><use href="#i-download" /></svg>
+            Load videos
+          </button>
+        </form>
+      <% } %>
+
       <p class="lawful-note">Only download content you own or have permission to keep.</p>
       <p class="status-line" id="statusLine" aria-live="polite"></p>
       <div id="results" aria-live="polite"></div>
@@ -47,6 +64,8 @@
             <li>A reel gives you its video. A post gives you every photo and video inside it.</li>
           <% } else if (platform.key === 'pinterest') { %>
             <li>Use the Photos / Videos switch to filter, or take everything.</li>
+          <% } else if (platform.key === 'tiktok') { %>
+            <li>Snatcher pulls the media out. Or switch to Profile to list a whole creator's videos.</li>
           <% } else { %>
             <li>Snatcher pulls the media out.</li>
           <% } %>

@@ -307,7 +307,8 @@
       } else if (
         err instanceof TypeError &&
         (/^https?:\/\/[^/]*\.tiktokio\.com\//i.test(url) ||
-          /^https?:\/\/tt-api\.faizankhichi\.me\//i.test(url))
+          /^https?:\/\/tt-api\.faizankhichi\.me\//i.test(url) ||
+          /^https?:\/\/[^/]*\.tiktokcdn(?:-[a-z]+)?\.com\//i.test(url))
       ) {
         // The browser fetch to the TikTok link was blocked (CORS / the
         // phone's network) — "Failed to fetch". A plain navigation to the
@@ -315,7 +316,9 @@
         // proves the link loads on this device. Hand the download to the
         // browser instead of showing an error. The file saves under the
         // server's tikio.com name rather than the caption name — a working
-        // download beats a pretty name. (Same for the tt-api /dl link.)
+        // download beats a pretty name. (Same for the tt-api /dl link, and
+        // for the TikTok Profile API's direct CDN download links, which
+        // send no CORS headers either.)
         hideDownloadLoader();
         setStatus('Downloading directly…');
         navigateDownload(url);
@@ -677,6 +680,232 @@
     }
   }
 
+  // --- TikTok profile ----------------------------------------------------------
+  // Profile mode (TikTok page only): list a creator's videos with a download
+  // link on each one, via GET /api/tiktok/profile (which proxies Faizan's
+  // TikTok Profile Search API). Download links are direct TikTok CDN URLs —
+  // the loader's fetch fails on them (no CORS headers), so startDownload's
+  // tiktokcdn fallback navigates instead, exactly like the tt-api /dl links.
+  const profileState = { query: '', cursor: null, hasMore: false, loading: false, links: [], countEl: null };
+
+  function fmtCount(n) {
+    if (n == null) return '—';
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+    return String(n);
+  }
+
+  function fmtDuration(s) {
+    if (s == null) return '';
+    const secs = Math.round(s);
+    return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  }
+
+  function profileHead(user) {
+    const head = el('div', { class: 'profile-head' });
+    if (user.avatar) {
+      const avatar = el('img', { class: 'profile-avatar', src: user.avatar, alt: '', loading: 'lazy' });
+      avatar.setAttribute('referrerpolicy', 'no-referrer');
+      avatar.addEventListener('error', () => { avatar.style.visibility = 'hidden'; });
+      head.appendChild(avatar);
+    } else {
+      head.appendChild(el('div', { class: 'profile-avatar profile-avatar--fallback', text: (user.username || '?').charAt(0).toUpperCase() }));
+    }
+    const info = el('div', { class: 'profile-info' });
+    const nameRow = el('div', { class: 'profile-name' });
+    nameRow.appendChild(document.createTextNode(user.nickname || user.username || ''));
+    if (user.verified) nameRow.appendChild(el('span', { class: 'badge-verified', text: 'Verified' }));
+    info.appendChild(nameRow);
+    info.appendChild(el('div', { class: 'profile-user', text: `@${user.username || ''}` }));
+    if (user.bio) info.appendChild(el('p', { class: 'profile-bio', text: user.bio }));
+    const stats = el('div', { class: 'profile-stats' });
+    const stat = (label, value) => {
+      const s = el('span');
+      s.appendChild(el('strong', { text: fmtCount(value) }));
+      s.appendChild(document.createTextNode(` ${label}`));
+      return s;
+    };
+    stats.appendChild(stat('followers', user.followers));
+    stats.appendChild(stat('following', user.following));
+    stats.appendChild(stat('likes', user.likes));
+    stats.appendChild(stat('videos', user.videoCount));
+    info.appendChild(stats);
+    head.appendChild(info);
+    return head;
+  }
+
+  function profileVideoCard(video, username) {
+    const card = el('article', { class: 'media-card profile-card' });
+    const preview = el('div', { class: 'preview' });
+    if (video.cover) {
+      const img = el('img', { src: video.cover, alt: video.desc || `Video ${video.id}`, loading: 'lazy' });
+      img.setAttribute('referrerpolicy', 'no-referrer');
+      img.addEventListener('error', () => { img.style.visibility = 'hidden'; });
+      preview.appendChild(img);
+    }
+    preview.appendChild(el('span', { class: 'type-badge', text: 'Video' }));
+    const dur = fmtDuration(video.duration);
+    if (dur) preview.appendChild(el('span', { class: 'video-duration', text: dur }));
+    card.appendChild(preview);
+
+    const body = el('div', { class: 'body' });
+    body.appendChild(el('p', { class: 'title', text: video.desc || `Video ${video.id}` }));
+    const metaParts = [];
+    if (video.plays != null) metaParts.push(`${fmtCount(video.plays)} plays`);
+    if (video.likes != null) metaParts.push(`${fmtCount(video.likes)} likes`);
+    if (video.created) {
+      const d = new Date(video.created * 1000);
+      if (!Number.isNaN(d.getTime())) metaParts.push(d.toLocaleDateString());
+    }
+    body.appendChild(el('p', { class: 'meta', text: metaParts.join(' · ') || 'Video' }));
+
+    const actions = el('div', { class: 'actions' });
+    if (video.downloadUrl) {
+      // The server signs the download through /dl (same-origin), so the
+      // loader fetches it with progress and saves it under this filename.
+      const filename = video.filename || `${(username || 'tiktok').replace(/^@/, '')}-${video.id || 'video'}.mp4`;
+      const download = el('a', { class: 'btn btn--primary', href: video.downloadUrl, download: filename }, [icon('download'), document.createTextNode('Download')]);
+      download.addEventListener('click', (event) => {
+        event.preventDefault();
+        startDownload(video.downloadUrl, filename);
+      });
+      actions.appendChild(download);
+    } else {
+      actions.appendChild(el('span', { class: 'btn btn--secondary', text: 'No download link' }));
+    }
+    if (video.url) {
+      actions.appendChild(el('a', { class: 'btn btn--secondary', href: video.url, target: '_blank', rel: 'noopener' }, [document.createTextNode('View on TikTok')]));
+    }
+    body.appendChild(actions);
+    card.appendChild(body);
+    return card;
+  }
+
+  function copyAllProfileLinks(btn) {
+    // The links are /dl URLs (relative) — absolutize them so a pasted link
+    // works outside this page.
+    const text = profileState.links
+      .map((link) => (link.startsWith('/') ? `${window.location.origin}${link}` : link))
+      .join('\n');
+    if (!text) return;
+    const done = () => {
+      btn.textContent = '';
+      btn.appendChild(icon('check'));
+      btn.appendChild(document.createTextNode(`Copied ${profileState.links.length} links`));
+      btn.classList.add('is-settled');
+      setTimeout(() => {
+        btn.textContent = '';
+        btn.classList.remove('is-settled');
+        btn.appendChild(icon('copy'));
+        btn.appendChild(document.createTextNode('Copy all download links'));
+      }, 2000);
+    };
+    const fallbackCopy = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => { fallbackCopy(); done(); });
+    } else {
+      fallbackCopy();
+      done();
+    }
+  }
+
+  async function runProfile(query, cursor) {
+    const q = String(query || '').trim();
+    if (!q || profileState.loading) return;
+    profileState.loading = true;
+    const isMore = !!cursor;
+    if (!isMore) {
+      profileState.query = q;
+      profileState.cursor = null;
+      profileState.hasMore = false;
+      profileState.links = [];
+      profileState.countEl = null;
+      resultsEl.textContent = '';
+      setLoading(`Loading @${q.replace(/^@/, '')} videos…`);
+    } else {
+      const btn = $('#profileLoadMore');
+      if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    }
+    try {
+      const params = new URLSearchParams({ u: q, limit: '30' });
+      if (cursor) params.set('cursor', cursor);
+      const res = await fetch(`/api/tiktok/profile?${params.toString()}`, { signal: AbortSignal.timeout(60000) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const error = new Error(data.error || 'Could not load this profile.');
+        error.code = data.code || 'unknown';
+        throw error;
+      }
+      profileState.loading = false;
+      clearStatus();
+      const videos = Array.isArray(data.videos) ? data.videos : [];
+      const username = data.user ? data.user.username : '';
+      if (!isMore) {
+        resultsEl.textContent = '';
+        if (data.user) resultsEl.appendChild(profileHead(data.user));
+        if (videos.length === 0) {
+          const empty = el('div', { class: 'empty-state' });
+          empty.appendChild(el('h3', { text: 'No videos found' }));
+          empty.appendChild(el('p', { text: 'This profile has no public videos listed.' }));
+          resultsEl.appendChild(empty);
+          return;
+        }
+        const head = el('div', { class: 'results-head' });
+        head.appendChild(el('h2', { text: 'Videos' }));
+        const count = el('p', { text: `${videos.length} loaded` });
+        profileState.countEl = count;
+        head.appendChild(count);
+        const copyAll = el('button', { class: 'btn btn--secondary', type: 'button' }, [icon('copy'), document.createTextNode('Copy all download links')]);
+        copyAll.addEventListener('click', () => copyAllProfileLinks(copyAll));
+        head.appendChild(copyAll);
+        resultsEl.appendChild(head);
+        resultsEl.appendChild(el('div', { class: 'media-grid', id: 'profileGrid' }));
+        resultsEl.appendChild(el('p', { class: 'profile-note', text: 'Download links are signed and expire — download soon after loading the list.' }));
+        const moreWrap = el('div', { class: 'profile-more' });
+        const more = el('button', { class: 'btn btn--secondary', type: 'button', id: 'profileLoadMore' }, [document.createTextNode('Load more')]);
+        more.addEventListener('click', () => {
+          if (profileState.hasMore && profileState.cursor) runProfile(profileState.query, profileState.cursor);
+        });
+        moreWrap.appendChild(more);
+        resultsEl.appendChild(moreWrap);
+      }
+      const grid = $('#profileGrid');
+      videos.forEach((v) => {
+        if (v.downloadUrl) profileState.links.push(v.downloadUrl);
+        if (grid) grid.appendChild(profileVideoCard(v, username));
+      });
+      profileState.cursor = data.cursor || null;
+      profileState.hasMore = !!data.hasMore;
+      if (profileState.countEl) {
+        const total = grid ? grid.children.length : videos.length;
+        profileState.countEl.textContent = `${total} loaded${data.hasMore ? ' · more available' : ''}`;
+      }
+      const moreBtn = $('#profileLoadMore');
+      if (moreBtn) {
+        moreBtn.style.display = profileState.hasMore ? '' : 'none';
+        moreBtn.disabled = false;
+        moreBtn.textContent = 'Load more';
+      }
+    } catch (err) {
+      profileState.loading = false;
+      clearStatus();
+      if (!isMore) {
+        renderEmpty(resultsEl, 'Could not load this profile', err.message || 'Try again.');
+      } else {
+        setStatus(err.message || 'Could not load more.', { alert: true });
+        const btn = $('#profileLoadMore');
+        if (btn) { btn.disabled = false; btn.textContent = 'Load more'; }
+      }
+    }
+  }
+
   // --- hamburger ---------------------------------------------------------------
   // Small screens only: the toggle button is hidden by CSS on desktop, and
   // the nav is always visible there — this is a no-op in that case.
@@ -799,6 +1028,44 @@
         const value = (filter.querySelector('input[name="mediaType"]:checked') || {}).value || 'all';
         renderMediaResult(resultsEl, lastResult, { filter: value });
       });
+    }
+
+    // TikTok profile mode: a second form that lists a creator's videos.
+    const modeToggle = $('#tiktokMode');
+    const profileForm = $('#profileForm');
+    const profileInput = $('#profileInput');
+    if (modeToggle && profileForm && profileInput && platform === 'tiktok') {
+      const setProfileMode = (on) => {
+        form.hidden = on;
+        profileForm.hidden = !on;
+        resultsEl.textContent = '';
+        clearStatus();
+        if (on) profileInput.focus();
+        else input.focus();
+      };
+      modeToggle.addEventListener('change', () => {
+        const value = (modeToggle.querySelector('input[name="tiktokMode"]:checked') || {}).value || 'video';
+        setProfileMode(value === 'profile');
+      });
+      profileForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const q = profileInput.value.trim();
+        if (!q) {
+          setStatus('Enter a TikTok username first.', { alert: true });
+          return;
+        }
+        runProfile(q, null).catch(() => {});
+      });
+      // Deep link: ?u=<username> opens the profile directly (unless ?url=
+      // already prefilled the single-video form).
+      const profileParam = params.get('u');
+      if (profileParam && !preset) {
+        const radio = modeToggle.querySelector('input[name="tiktokMode"][value="profile"]');
+        if (radio) radio.checked = true;
+        profileInput.value = profileParam;
+        setProfileMode(true);
+        runProfile(profileParam, null).catch(() => {});
+      }
     }
   }
 

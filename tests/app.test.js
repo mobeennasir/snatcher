@@ -260,6 +260,28 @@ describe('batch', () => {
   });
 });
 
+describe('tiktok profile', () => {
+  it('GET /api/tiktok/profile without u is a 400', async () => {
+    const res = await request(app).get('/api/tiktok/profile');
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('invalid_url');
+  });
+
+  it('GET /tiktok renders the Profile mode toggle and form', async () => {
+    const res = await request(app).get('/tiktok');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('tiktokMode');
+    expect(res.text).toContain('profileForm');
+    expect(res.text).toContain('Profile');
+  });
+
+  it('GET /tiktok carries the profile FAQ', async () => {
+    const res = await request(app).get('/tiktok');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Can I download all videos from a TikTok profile?');
+  });
+});
+
 describe('signed download proxy', () => {
   it('GET /dl without a signature is a 403', async () => {
     const res = await request(app).get('/dl?u=https://example.com/x.mp4');

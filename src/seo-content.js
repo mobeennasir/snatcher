@@ -57,6 +57,10 @@ const PLATFORM_CONTENT = {
         q: 'Do I need the TikTok app?',
         a: 'No. You only need the video link. Paste it here and download — no app, no account, no sign-in.',
       },
+      {
+        q: 'Can I download all videos from a TikTok profile?',
+        a: 'Yes. Switch to Profile on the TikTok page, enter a username, and Snatcher lists that creator\u2019s public videos with a download link on each one. Copy all the links at once, or download videos one by one.',
+      },
     ],
   },
 
